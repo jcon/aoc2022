@@ -11,6 +11,10 @@ fn main() {
   println!("predicted score if you have suggested match result: {}", predict_score_from_result(content.lines()).expect("couldn't predict score"));
 }
 
+// NOTE: I was trying to figure out how to instead accept an Iterator of string instead, since it felt
+// more flexible and less tied to strings. (for instance it'd pipe better into file i/o if we didn't
+// read everything into a string). It is possible, but more verbose, and involves declaring lifetimes
+// fn predict_score_from_move<'a>(lines: impl Iterator<Item = &'a str>) -> Result<i32, ParseMatchError> {
 fn predict_score_from_move(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
   Ok(
     lines.map(|l| Match::from_str(l))
@@ -122,23 +126,32 @@ impl Match {
 }
 
 #[derive(Debug, Clone)]
-struct ParseMatchError;
+enum ParseMatchError {
+  ExpectedMove{ s: String },
+  InvalidMove{ s: String },
+  InvalidOrdering{ s: String }
+}
 
 impl FromStr for Match {
     type Err = ParseMatchError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut moves = s.split(" ");
-        let their_move = moves.next().expect("Expected their move").parse().expect("not a valid move");
-        let next = moves.next().expect("Expected my move");
+        let their_move =
+          moves.next()
+               .ok_or(ParseMatchError::ExpectedMove { s: s.to_string() })?
+               .parse::<Move>().map_err(|_| ParseMatchError::InvalidMove { s: s.to_string() })?;
+        let next =
+          moves.next()
+               .ok_or(ParseMatchError::ExpectedMove { s: s.to_string() })?;
         Ok(Match {
           their_move,
-          your_move: next.parse().expect("not a valid move"),
+          your_move: next.parse().map_err(|_| ParseMatchError::InvalidMove { s: s.to_string() })?,
           you_should_be: match next {
             "X" => Ordering::Less,
             "Y" => Ordering::Equal,
             "Z" => Ordering::Greater,
-            _ => return Err(ParseMatchError{})
+            _ => return Err(ParseMatchError::InvalidOrdering { s: s.to_string() })
           }
         })
     }
