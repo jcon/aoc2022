@@ -3,31 +3,23 @@ use std::str::FromStr;
 
 use std::str::Lines;
 
-struct Cli {
-    pub path: std::path::PathBuf,
-}
-
-// NOTE: could use something like clap instead.
-impl Cli {
-    pub fn parse() -> Self {
-        let path = std::env::args().nth(1).expect("no path given");
-        Cli {
-            path: std::path::PathBuf::from(path),
-        }
-    }
-}
-
 fn main() {
   let args = Cli::parse();
   let content = std::fs::read_to_string(&args.path).expect("could not read file");
-  println!("predicted score: {}", predict_score(content.lines()).expect("couldn't predict score"));
+  println!("predicted score if you play: {}", predict_score_from_move(content.lines()).expect("couldn't predict score"));
+  println!("predicted score if you have suggested match result: {}", predict_score_from_result(content.lines()).expect("couldn't predict score"));
 }
 
-fn predict_score(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
+fn predict_score_from_move(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
   Ok(lines.map(|l| Match::from_str(l))
-      // .try_fold(0, |accum, m1| m1.map(|m2| accum + m2.score()))
-      .fold(0, |accum, m1| accum + m1.expect("should have a match").score()))
+      // .try_fold(0, |acc, m1| m1.map(|m2| acc + m2.score()))
+      .fold(0, |acc, m1| acc + m1.expect("should have a match").score_from_move()))
+}
 
+fn predict_score_from_result(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
+  Ok(lines.map(|l| Match::from_str(l))
+      // .try_fold(0, |acc, m1| m1.map(|m2| acc + m2.score()))
+      .fold(0, |acc, m1| acc + m1.expect("should have a match").score_from_result()))
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
@@ -43,6 +35,21 @@ impl Move {
       Self::Rocks => 1,
       Self::Paper => 2,
       Self::Scissors => 3,
+    }
+  }
+
+  pub fn get_move(&self, ord: Ordering) -> Move {
+    if ord == Ordering::Equal {
+      return self.clone();
+    }
+    match self {
+      Self::Rocks if ord == Ordering::Less => Self::Scissors,
+      Self::Rocks if ord == Ordering::Greater => Self::Paper,
+      Self::Paper if ord == Ordering::Less => Self::Rocks,
+      Self::Paper if ord == Ordering::Greater => Self::Scissors,
+      Self::Scissors if ord == Ordering::Less => Self::Paper,
+      Self::Scissors if ord == Ordering::Greater => Self::Rocks,
+      _ => panic!("Should not get here")
     }
   }
 }
@@ -85,15 +92,25 @@ impl FromStr for Move {
 struct Match {
   their_move: Move,
   your_move: Move,
+  you_should_be: Ordering,
 }
 
 impl Match {
-  pub fn score(&self) -> i32 {
+  pub fn score_from_move(&self) -> i32 {
     (match self.your_move.cmp(&self.their_move) {
       Ordering::Greater => 6,
       Ordering::Equal => 3,
       Ordering::Less => 0,
     }) + self.your_move.score()
+  }
+
+  pub fn score_from_result(&self) -> i32 {
+    let your_move = self.their_move.get_move(self.you_should_be);
+    (match your_move.cmp(&self.their_move) {
+      Ordering::Greater => 6,
+      Ordering::Equal => 3,
+      Ordering::Less => 0,
+    }) + your_move.score()
   }
 }
 
@@ -105,10 +122,32 @@ impl FromStr for Match {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut moves = s.split(" ");
+        let their_move = moves.next().expect("Expected their move").parse().expect("not a valid move");
+        let next = moves.next().expect("Expected my move");
         Ok(Match {
-          their_move: moves.next().expect("Expected their move").parse().expect("not a valid move"),
-          your_move: moves.next().expect("Expected my move").parse().expect("not a valid move"),
+          their_move,
+          your_move: next.parse().expect("not a valid move"),
+          you_should_be: match next {
+            "X" => Ordering::Less,
+            "Y" => Ordering::Equal,
+            "Z" => Ordering::Greater,
+            _ => return Err(ParseMatchError{})
+          }
         })
+    }
+}
+
+struct Cli {
+    pub path: std::path::PathBuf,
+}
+
+// NOTE: could use something like clap instead.
+impl Cli {
+    pub fn parse() -> Self {
+        let path = std::env::args().nth(1).expect("no path given");
+        Cli {
+            path: std::path::PathBuf::from(path),
+        }
     }
 }
 
@@ -135,31 +174,55 @@ mod tests {
     assert_eq!(Match {
         their_move: Rocks,
         your_move: Paper,
-      }.score(), 8);
+        you_should_be: Less,
+      }.score_from_move(), 8);
     assert_eq!(Match {
         their_move: Paper,
         your_move: Rocks,
-      }.score(), 1);
+        you_should_be: Greater,
+      }.score_from_move(), 1);
     assert_eq!(Match {
         their_move: Scissors,
         your_move: Rocks,
-      }.score(), 7);
+        you_should_be: Greater,
+      }.score_from_move(), 7);
     assert_eq!(Match {
         their_move: Paper,
         your_move: Paper,
-      }.score(), 5);
+        you_should_be: Greater,
+      }.score_from_move(), 5);
+  }
+
+  #[test]
+  fn test_move_get_move() {
+    assert_eq!(Move::Scissors, Move::Rocks.get_move(Less));
+    assert_eq!(Move::Paper, Move::Rocks.get_move(Greater));
+    assert_eq!(Move::Rocks, Move::Paper.get_move(Less));
+    assert_eq!(Move::Scissors, Move::Paper.get_move(Greater));
+    assert_eq!(Move::Paper, Move::Scissors.get_move(Less));
+    assert_eq!(Move::Rocks, Move::Scissors.get_move(Greater));
   }
 
   #[test]
   fn test_match_parsing() {
-    assert_eq!(8, Match::from_str("A Y").unwrap().score());
-    assert_eq!(1, Match::from_str("B X").unwrap().score());
-    assert_eq!(6, Match::from_str("C Z").unwrap().score());
+    assert_eq!(8, Match::from_str("A Y").unwrap().score_from_move());
+    assert_eq!(4, Match::from_str("A Y").unwrap().score_from_result());
+    assert_eq!(1, Match::from_str("B X").unwrap().score_from_move());
+    assert_eq!(1, Match::from_str("B X").unwrap().score_from_result());
+    assert_eq!(6, Match::from_str("C Z").unwrap().score_from_move());
+    assert_eq!(7, Match::from_str("C Z").unwrap().score_from_result());
   }
 
   #[test]
-  fn test_predict_score() {
-    assert_eq!(15, predict_score("A Y
+  fn test_predict_score_from_move() {
+    assert_eq!(15, predict_score_from_move("A Y
+B X
+C Z".lines()).expect("oops"));
+  }
+
+  #[test]
+  fn test_predict_score_from_result() {
+    assert_eq!(12, predict_score_from_result("A Y
 B X
 C Z".lines()).expect("oops"));
   }
