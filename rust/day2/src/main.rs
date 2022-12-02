@@ -1,5 +1,6 @@
 use std::cmp::{Ord, Ordering};
 use std::str::FromStr;
+use utils::cli::Cli;
 mod ordinals;
 
 use std::str::Lines;
@@ -154,20 +155,6 @@ impl FromStr for Match {
             _ => return Err(ParseMatchError::InvalidOrdering { s: s.to_string() })
           }
         })
-    }
-}
-
-struct Cli {
-    pub path: std::path::PathBuf,
-}
-
-// NOTE: could use something like clap instead.
-impl Cli {
-    pub fn parse() -> Self {
-        let path = std::env::args().nth(1).expect("no path given");
-        Cli {
-            path: std::path::PathBuf::from(path),
-        }
     }
 }
 
