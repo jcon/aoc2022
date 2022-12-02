@@ -11,15 +11,21 @@ fn main() {
 }
 
 fn predict_score_from_move(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
-  Ok(lines.map(|l| Match::from_str(l))
-      // .try_fold(0, |acc, m1| m1.map(|m2| acc + m2.score()))
-      .fold(0, |acc, m1| acc + m1.expect("should have a match").score_from_move()))
+  Ok(
+    lines.map(|l| Match::from_str(l))
+      .collect::<Result<Vec<Match>,_>>()?
+      .iter()
+      .fold(0, |acc, m1| acc + m1.score_from_move())
+  )
 }
 
 fn predict_score_from_result(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
-  Ok(lines.map(|l| Match::from_str(l))
-      // .try_fold(0, |acc, m1| m1.map(|m2| acc + m2.score()))
-      .fold(0, |acc, m1| acc + m1.expect("should have a match").score_from_result()))
+  Ok(
+    lines.map(|l| Match::from_str(l))
+      .collect::<Result<Vec<Match>,_>>()?
+      .iter()
+      .fold(0, |acc, m1| acc + m1.score_from_result())
+  )
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
