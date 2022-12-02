@@ -1,16 +1,9 @@
 use std::cmp::{Ord, Ordering};
 use std::str::FromStr;
-mod ordinals;
 
 use std::str::Lines;
 
-fn main() {
-  let args = Cli::parse();
-  let content = std::fs::read_to_string(&args.path).expect("could not read file");
-  println!("predicted score if you play: {}", predict_score_from_move(content.lines()).expect("couldn't predict score"));
-  println!("predicted score if you have suggested match result: {}", predict_score_from_result(content.lines()).expect("couldn't predict score"));
-}
-
+#[allow(dead_code)]
 fn predict_score_from_move(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
   Ok(
     lines.map(|l| Match::from_str(l))
@@ -20,6 +13,7 @@ fn predict_score_from_move(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
   )
 }
 
+#[allow(dead_code)]
 fn predict_score_from_result(lines: Lines<'_>) -> Result<i32, ParseMatchError> {
   Ok(
     lines.map(|l| Match::from_str(l))
@@ -38,30 +32,29 @@ enum Move {
 
 impl Move {
   pub fn score(&self) -> i32 {
-    match *self {
-      Self::Rocks => 1,
-      Self::Paper => 2,
-      Self::Scissors => 3,
-    }
-  }
+    (*self as i32) + 1
+ }
 
   pub fn get_move(&self, ord: Ordering) -> Move {
-    if ord == Ordering::Equal {
-      return self.clone();
-    }
-    match self {
-      Self::Rocks if ord == Ordering::Less => Self::Scissors,
-      Self::Rocks if ord == Ordering::Greater => Self::Paper,
-      Self::Paper if ord == Ordering::Less => Self::Rocks,
-      Self::Paper if ord == Ordering::Greater => Self::Scissors,
-      Self::Scissors if ord == Ordering::Less => Self::Paper,
-      Self::Scissors if ord == Ordering::Greater => Self::Rocks,
-      _ => panic!("Should not get here")
+    // Take advantage of of a few things:
+    // - Move is ordered so that the next element in the enum (with modulo arithmetic) is greater than the previous element.
+    // - Ordering's ordinal values are: -1 for less, 0 for equal, and 1 for greater
+    // - modulo math gets the correct results: Less than Rocks => (-1 + 0).rem_euclid(3) = 2 (Scissors, which loses to rocks)
+    //    NOTE: % in rust is remainder, not modulo as might be expected. i8::rem_euclid performs modulo math instead.
+    let move_ordinal = ((*self as i8) + (ord as i8)).rem_euclid(3);
+    match move_ordinal {
+      0 => Self::Rocks,
+      1 => Self::Paper,
+      2 => Self::Scissors,
+      _ => panic!("Should not be here; ordinal can only be [0, 2] {}", move_ordinal)
     }
   }
 }
 
 impl Ord for Move {
+  // Rocks - 0
+  // Paper - 1
+  // Scissors - 2
   fn cmp(&self, other: &Self) -> Ordering {
     if self == other {
       return Ordering::Equal;
