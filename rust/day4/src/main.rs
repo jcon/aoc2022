@@ -2,7 +2,6 @@ use utils::cli::Cli;
 
 use std::{str::Lines};
 use std::str::FromStr;
-use std::num::ParseIntError;
 
 fn main() {
   let args = Cli::parse();
