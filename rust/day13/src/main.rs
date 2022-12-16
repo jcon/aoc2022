@@ -3,13 +3,13 @@ use std::{cmp::Ordering};
 fn main() {
   part1(include_str!("../../inputs/day13.sample.txt"));
   part1(include_str!("../../inputs/day13.txt"));
+  part2(include_str!("../../inputs/day13.sample.txt"));
+  part2(include_str!("../../inputs/day13.txt"));
 }
 
 fn part1(input: &str) {
   let mut sum = 0;
-  for (i, pairs) in input.split("\n\n").enumerate() {
-    let i = i + 1;
-
+  for (index, pairs) in input.split("\n\n").enumerate() {
     let mut nodes = pairs
       .lines()
       .map(|line| serde_json::from_str::<Node>(line).unwrap());
@@ -17,10 +17,28 @@ fn part1(input: &str) {
     let r = nodes.next().unwrap();
     // println!("compare(l, r) = {:?}", compare(&l, &r));
     if compare(&l, &r) == Ordering::Less {
-      sum += i;
+      sum += index + 1;
     }
   }
   dbg!(sum);
+}
+
+fn part2(input: &str) {
+  let mut packets: Vec<_> = input
+    .split("\n")
+    .filter(|l| l.len() > 0)
+    .map(|line| serde_json::from_str::<Node>(line).unwrap())
+    .collect();
+  let divider1 = Node::Nested(vec![Node::Item(2)]);
+  let divider2 = Node::Nested(vec![Node::Item(6)]);
+  packets.push(divider1.clone());
+  packets.push(divider2.clone());
+
+  packets.sort_by(|l, r| compare(l, r));
+  // dbg!(&packets);
+  let pos1 = packets.iter().position(|i| i == &divider1).unwrap() + 1;
+  let pos2 = packets.iter().position(|i| i == &divider2).unwrap() + 1;
+  dbg!(pos1*pos2);
 }
 
 fn compare(left: &Node, right: &Node) -> Ordering {
@@ -41,7 +59,6 @@ fn compare(left: &Node, right: &Node) -> Ordering {
           (None, None) => return Ordering::Equal,
           (None, _) => return Ordering::Less,
           (_, None) => return Ordering::Greater,
-          _ => todo!()
         }
       }
     },
