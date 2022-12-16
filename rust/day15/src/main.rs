@@ -1,11 +1,10 @@
-use std::collections::HashSet;
 use std::str::Lines;
 use std::cmp::{min, max};
 
 use nom::IResult;
 use nom::bytes::complete::{tag, take_while1};
 use nom::combinator::{map_res};
-use nom::sequence::{tuple, pair};
+use nom::sequence::{tuple};
 
 fn main() {
     let input = include_str!("../../inputs/day15.sample.txt");
@@ -15,57 +14,41 @@ fn main() {
     let input = include_str!("../../inputs/day15.txt");
     impossible_positions(input.lines(), 2_000_000);
 
+    println!("***** part 2");
+
+    let input = include_str!("../../inputs/day15.sample.txt");
+    if let Some(p) = find_open_position(input.lines(), 20) {
+      println!("in sample, found open point: {:?} tuning frequency {}", p, p.x * 4_000_000 + p.y);
+    }
+
+    let input = include_str!("../../inputs/day15.txt");
+    if let Some(p) = find_open_position(input.lines(), 4_000_000) {
+      println!("in real input, found open point: {:?} tuning frequency {}", p, p.x * 4_000_000 + p.y);
+    }
 }
 
-fn impossible_positions(lines: Lines<'_>, pos: i32) -> i32 {
-  let pairs: Vec<_> =
-    lines.map(|line| {
-      let (_, pair) = parse_line(line).unwrap();
-      pair
-    })
-    .collect();
+fn impossible_positions(lines: Lines<'_>, pos: i64) -> i64 {
+  // Improve on the brute force version, by just looking for ranges of
+  // points that must be filled in. For a given sensor, beacon, and position line,
+  // we can calculate the range by subtracting the distance from S to P from S's
+  // manhattan distance to B, so we end up with a range of [s.x-leftover, s.x+leftover]
+  //
+  //    .....S.....
+  //    .....#.....
+  // P  .#########.
+  //    ...........
+  //    .........B.
+  // Then we just have to merge the ranges, and add up the range lengths to figure
+  // how many positions another beacon cannot be in.
+  let pairs: Vec<_> = parse_lines(lines);
 
-  println!("parsed pairs");
-
-  let (min_corner, max_corner) = get_bounds(&pairs);
-
-  let nearby_pairs =
-    pairs.iter().filter(|(s, b)| {
-      (s.y < pos) && (s.y + manhattan_distance(s, b) >= pos) ||
-      (s.y > pos) && (s.y - manhattan_distance(s, b) <= pos)
-    })
-    .copied()
-    .collect::<Vec<_>>();
-
-  println!("len of pairs around point: {}", nearby_pairs.len());
-
-  let mut impossible_count = 0;
-  // let mut filled = HashSet::new();
-  // for (sensor, beacon) in &nearby_pairs {
-  //   filled.insert(sensor);
-  //   filled.insert(beacon);
-  // }
-  // still brute force; requires us looking at millions of points.
-  // we can speed this up by making ranges of points at row 'pos'
-  // that would be there, merge overlapping lists, then count the length
-  // of each range.
-  // println!("checking {} points", max_corner.x - min_corner.x);
-  // 'next_x: for x in min_corner.x..max_corner.x+1 {
-  //   // Count any space that's a manhattan_distance from a nearby pair
-  //   // that isn't filled by a beacon or sensor
-  //   for (sensor, beacon) in &nearby_pairs {
-  //     if !filled.contains(&Point { x, y: pos }) &&
-  //       manhattan_distance(&Point { x, y: pos }, &sensor) <=
-  //         manhattan_distance(&sensor, &beacon) {
-  //       impossible_count += 1;
-  //       continue 'next_x;
-  //     }
-  //   }
-  // }
   let mut ranges: Vec<Range> = vec![];
-  for (sensor, beacon) in &nearby_pairs {
+  for (sensor, beacon) in &pairs {
     let distance = manhattan_distance(&sensor, &beacon);
     let line_distance = pos - sensor.y;
+    if line_distance.abs() > distance {
+      continue;
+    }
 
     ranges.push(Range {
       start: sensor.x - (distance - line_distance.abs()),
@@ -73,7 +56,59 @@ fn impossible_positions(lines: Lines<'_>, pos: i32) -> i32 {
     });
   }
 
+  let ranges = merge_ranges(&ranges);
 
+  // dbg!(&keep_ranges);
+
+  let impossible_count = ranges
+    .iter()
+    .map(|r| r.stop - r.start)
+    .sum();
+
+  println!("(FAST) impossible positions: {}", impossible_count);
+
+  impossible_count
+}
+
+fn find_open_position(lines: Lines<'_>, max_side: i64) -> Option<Point> {
+  let pairs: Vec<_> = parse_lines(lines);
+
+  let x_range = Range { start: 0, stop: max_side };
+  for y in 0..max_side {
+    if let Some(x) = open_position(&pairs, y, &x_range) {
+      return Some(Point { x, y });
+    }
+  }
+  return None;
+}
+
+fn open_position(pairs: &Vec<(Point, Point)>, pos: i64, x_range: &Range) -> Option<i64> {
+  let mut ranges: Vec<Range> = vec![];
+  for (sensor, beacon) in pairs {
+    let distance = manhattan_distance(&sensor, &beacon);
+    let line_distance = pos - sensor.y;
+    if line_distance.abs() > distance {
+      continue;
+    }
+
+    ranges.push(Range {
+      start: sensor.x - (distance - line_distance.abs()),
+      stop: sensor.x + (distance - line_distance.abs()),
+    });
+  }
+
+  let ranges = merge_ranges(&ranges);
+
+  // dbg!(&ranges);
+  match ranges.len() {
+    1 => None,
+    2 => Some(ranges[0].stop + 1),
+    _ => panic!("expected 1 or 2 ranges, not {}", ranges.len())
+  }
+}
+
+fn merge_ranges(ranges: &Vec<Range>) -> Vec<Range> {
+  let mut ranges = ranges.clone();
   let mut keep_ranges = vec![];
   ranges.sort_by(|a, b| a.start.cmp(&b.start));
   // dbg!(&ranges);
@@ -86,25 +121,14 @@ fn impossible_positions(lines: Lines<'_>, pos: i32) -> i32 {
     let last_range = keep_ranges.last_mut().unwrap();
     if last_range.overlaps(&ranges[current]) {
       // println!("{:?} overlaps {:?}", ranges[last], ranges[current]);
-      // let last_range = keep_ranges.last_mut().unwrap();
       last_range.stop = max(last_range.stop, ranges[current].stop);
     } else {
       // println!("{:?} DOES NOT overlap {:?}", ranges[last], ranges[current]);
       keep_ranges.push(ranges[current]);
     }
-    // last = current;
   }
 
-  // dbg!(&keep_ranges);
-
-  impossible_count = keep_ranges
-    .iter()
-    .map(|r| r.stop - r.start)
-    .sum();
-
-  println!("(FAST) impossible positions: {}", impossible_count);
-
-  impossible_count
+  keep_ranges
 }
 
 fn get_bounds(pairs: &Vec<(Point, Point)>) -> (Point, Point) {
@@ -119,7 +143,7 @@ fn get_bounds(pairs: &Vec<(Point, Point)>) -> (Point, Point) {
   (min_corner, max_corner)
 }
 
-fn impossible_positions_brute(lines: Lines<'_>, pos: i32) -> i32 {
+fn impossible_positions_brute(lines: Lines<'_>, pos: i64) -> i64 {
   let pairs: Vec<_> =
     lines.map(|line| {
       let (_, pair) = parse_line(line).unwrap();
@@ -178,22 +202,22 @@ fn impossible_positions_brute(lines: Lines<'_>, pos: i32) -> i32 {
 
   println!("impossible positions: {}", impossible_positions);
 
-  impossible_positions as i32
+  impossible_positions as i64
 }
 
-fn manhattan_distance(p1: &Point, p2: &Point) -> i32 {
+fn manhattan_distance(p1: &Point, p2: &Point) -> i64 {
   (p1.x - p2.x).abs() + (p1.y - p2.y).abs()
 }
 
 fn print_screen(min: &Point, screen: &Vec<Vec<char>>) {
   // let mut line = 0;
-  // for x in (min.x)..(min.x+(screen[0].len() as i32) +1) {
+  // for x in (min.x)..(min.x+(screen[0].len() as i64) +1) {
   //   if x % 5 == 0 && x < 0 {
   //     buf[x] = '-';
   //   }
   // }
   // let buf = String::from_iter(vec![' '; screen[0].len()]);
-  // for x in (min.x)..(min.x+(screen[0].len() as i32) +1) {
+  // for x in (min.x)..(min.x+(screen[0].len() as i64) +1) {
   //   if x % 5 == 0 && x < 0 {
   //     buf[x] = '-';
   //   }
@@ -207,20 +231,32 @@ fn print_screen(min: &Point, screen: &Vec<Vec<char>>) {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct Point {
-  x: i32,
-  y: i32,
+  x: i64,
+  y: i64,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct Range {
-  start: i32,
-  stop: i32,
+  start: i64,
+  stop: i64,
 }
 
 impl Range {
   fn overlaps(&self, other: &Range) -> bool {
     self.start <= other.start && other.start <= self.stop
   }
+}
+
+fn parse_lines(lines: Lines<'_>) -> Vec<(Point, Point)> {
+  let pairs: Vec<_> =
+    lines.map(|line| {
+      let (_, pair) = parse_line(line).unwrap();
+      pair
+    })
+    .collect();
+
+  println!("parsed pairs");
+  pairs
 }
 
 // Sensor at x=9, y=16: closest beacon is at x=10, y=16
@@ -241,7 +277,7 @@ fn parse_point(input: &str) -> IResult<&str, Point> {
   Ok((input, Point { x, y }))
 }
 
-fn parse_number(i: &str) -> IResult<&str, i32> {
+fn parse_number(i: &str) -> IResult<&str, i64> {
   map_res(
     take_while1(|c: char| c.is_ascii_digit() || c == '-'),
     |s: &str| {
